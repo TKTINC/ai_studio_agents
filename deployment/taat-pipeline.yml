@@ -1,0 +1,90 @@
+name: TAAT CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/agents/taat/**'
+      - 'src/agent_core/**'
+      - 'src/shared_modules/**'
+      - 'deployment/taat/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/agents/taat/**'
+      - 'src/agent_core/**'
+      - 'src/shared_modules/**'
+      - 'deployment/taat/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build TAAT package
+        run: |
+          echo "Building TAAT agent package"
+          # Package-specific build commands would go here
+          mkdir -p dist/taat
+          cp -r src/agent_core dist/taat/
+          cp -r src/shared_modules dist/taat/
+          cp -r src/agents/taat dist/taat/agents/
+          cp src/main.py dist/taat/
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: taat-build
+          path: dist/taat
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: taat-build
+          path: dist/taat
+      - name: Run TAAT tests
+        run: |
+          echo "Running TAAT agent tests"
+          pytest tests/agents/taat/ tests/agent_core/ -v
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Only deploy from main branch
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: taat-build
+          path: dist/taat
+      - name: Deploy TAAT agent
+        run: |
+          echo "Deploying TAAT agent to target environment"
+          # Deployment commands would go here
+          # This could include Docker build and push, cloud deployment, etc.
+      - name: Notify deployment status
+        run: |
+          echo "TAAT agent deployment completed"
+          # Notification commands would go here

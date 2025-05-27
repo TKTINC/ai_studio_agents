@@ -1,0 +1,90 @@
+name: MENTOR CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/agents/mentor/**'
+      - 'src/agent_core/**'
+      - 'src/shared_modules/**'
+      - 'deployment/mentor/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/agents/mentor/**'
+      - 'src/agent_core/**'
+      - 'src/shared_modules/**'
+      - 'deployment/mentor/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build MENTOR package
+        run: |
+          echo "Building MENTOR agent package"
+          # Package-specific build commands would go here
+          mkdir -p dist/mentor
+          cp -r src/agent_core dist/mentor/
+          cp -r src/shared_modules dist/mentor/
+          cp -r src/agents/mentor dist/mentor/agents/
+          cp src/main.py dist/mentor/
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: mentor-build
+          path: dist/mentor
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: mentor-build
+          path: dist/mentor
+      - name: Run MENTOR tests
+        run: |
+          echo "Running MENTOR agent tests"
+          pytest tests/agents/mentor/ tests/agent_core/ -v
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Only deploy from main branch
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: mentor-build
+          path: dist/mentor
+      - name: Deploy MENTOR agent
+        run: |
+          echo "Deploying MENTOR agent to target environment"
+          # Deployment commands would go here
+          # This could include Docker build and push, cloud deployment, etc.
+      - name: Notify deployment status
+        run: |
+          echo "MENTOR agent deployment completed"
+          # Notification commands would go here
