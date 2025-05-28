@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Type
 
 from .config import AgentConfig, load_config
 from .memory.memory import WorkingMemory
+from .memory.memory_manager import MemoryManager
 from .perception.perception import BasePerceptionModule
 from .cognition.cognition import BaseCognitionModule
 from .action.action import BaseActionModule
@@ -40,7 +41,17 @@ class BaseAgent:
             action_class: Class to use for action module
         """
         self.config = config or load_config()
-        self.memory = WorkingMemory(max_history=self.config.max_history)
+        
+        # Initialize memory systems
+        self.memory_manager = MemoryManager(
+            agent_id=self.config.agent_id,
+            storage_path=self.config.storage_path
+        )
+        
+        # Keep working memory reference for backward compatibility
+        self.memory = self.memory_manager.working
+        
+        # Initialize perception, cognition, and action modules
         self.perception = perception_class()
         self.cognition = cognition_class(self.config.llm_settings)
         self.action = action_class()
@@ -60,17 +71,62 @@ class BaseAgent:
         # 1. Perception: Process input
         processed_input = await self.perception.process_input(input_data, input_type)
         
+        # Store experience in episodic memory
+        self.memory_manager.store_experience(
+            content=processed_input,
+            experience_type=f"input_{input_type}",
+            metadata={"timestamp": asyncio.get_event_loop().time()}
+        )
+        
         # 2. Cognition: Generate response
-        context = self.memory.get_context()
+        # Get full context from all memory systems
+        context = self.memory_manager.get_full_context()
         response = await self.cognition.process(processed_input, context)
         
         # 3. Action: Execute response
         result = await self.action.execute(response)
         
         # 4. Memory: Update with this interaction
-        self.memory.update(processed_input, response, result)
+        self.memory_manager.update_working_memory(processed_input, response, result)
+        
+        # Store action result in episodic memory
+        self.memory_manager.store_experience(
+            content=result,
+            experience_type="action_result",
+            metadata={
+                "input_type": input_type,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+        )
         
         return result
+    
+    async def execute_procedure(self, procedure_id: str, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Execute a stored procedure from procedural memory.
+        
+        Args:
+            procedure_id: ID of the procedure to execute
+            parameters: Parameters to pass to the procedure
+            
+        Returns:
+            Execution results
+        """
+        return await self.memory_manager.execute_procedure(procedure_id, parameters)
+    
+    async def learn_from_outcome(self, procedure_id: str, outcome: Any, metrics: Dict[str, Any]) -> bool:
+        """
+        Update procedural memory based on execution outcomes.
+        
+        Args:
+            procedure_id: ID of the procedure to update
+            outcome: Outcome of the procedure execution
+            metrics: Performance metrics
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        return self.memory_manager.learn_from_outcome(procedure_id, outcome, metrics)
     
     async def run_loop(self):
         """
