@@ -400,11 +400,32 @@ class ExperienceGuidedDecisionMaking:
                 "confidence": 0.5 + 0.5 * option_scores[best_index]  # Higher confidence for exploitation
             }
         
-        # Add experience information
-        decision["experience_guided"] = True
-        decision["experiences_used"] = len(past_experiences)
-        
         return decision
+    
+    def _make_basic_decision(self, 
+                           options: List[Dict[str, Any]], 
+                           context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make a basic decision without past experiences.
+        
+        Args:
+            options: List of decision options
+            context: Current context
+            
+        Returns:
+            Decision result
+        """
+        # This is a placeholder for actual decision-making logic
+        # In a real implementation, this would use an LLM or other decision system
+        
+        # For now, just choose the first option
+        return {
+            "decision": options[0],
+            "score": 0.5,
+            "reason": "No past experiences available, using default decision-making",
+            "exploration": False,
+            "confidence": 0.5
+        }
     
     def _score_options_from_experiences(self, 
                                       options: List[Dict[str, Any]], 
@@ -419,59 +440,506 @@ class ExperienceGuidedDecisionMaking:
             past_experiences: List of relevant past experiences
             
         Returns:
-            List of option scores
+            List of scores for each option
         """
         option_scores = [0.0] * len(options)
         
-        # Sort experiences by recency
-        sorted_experiences = sorted(
-            past_experiences,
-            key=lambda x: x.get("timestamp", ""),
-            reverse=True  # Most recent first
-        )
+        # Calculate recency weights for experiences
+        now = datetime.now()
+        recency_weights = []
         
-        # Calculate recency weights
-        total_experiences = len(sorted_experiences)
-        recency_weights = [
-            1.0 - self.recency_factor * (i / total_experiences)
-            for i in range(total_experiences)
-        ]
+        for exp in past_experiences:
+            if "timestamp" in exp:
+                try:
+                    exp_time = datetime.fromisoformat(exp["timestamp"].replace('Z', '+00:00'))
+                    age_days = (now - exp_time).total_seconds() / (24 * 3600)
+                    weight = math.exp(-self.recency_factor * age_days)
+                    recency_weights.append(weight)
+                except (ValueError, AttributeError):
+                    recency_weights.append(1.0)
+            else:
+                recency_weights.append(1.0)
         
-        # For each option, calculate score from experiences
+        # Normalize recency weights
+        total_weight = sum(recency_weights)
+        if total_weight > 0:
+            recency_weights = [w / total_weight for w in recency_weights]
+        else:
+            recency_weights = [1.0 / len(past_experiences)] * len(past_experiences)
+        
+        # Score each option based on past experiences
         for i, option in enumerate(options):
-            option_name = option.get("name", str(i))
+            option_score = 0.0
             
-            for j, experience in enumerate(sorted_experiences):
-                # Extract experience details
-                exp_option = experience.get("option", "")
-                exp_outcome = experience.get("outcome", {})
-                exp_context = experience.get("context", {})
+            for j, exp in enumerate(past_experiences):
+                # Calculate similarity between current option and past experience
+                similarity = self._calculate_similarity(option, exp, context)
                 
-                # Check if this experience is relevant to this option
-                if option_name == exp_option or option_name in str(exp_option):
-                    # Calculate similarity between current context and experience context
-                    context_similarity = self._calculate_context_similarity(context, exp_context)
-                    
-                    # Calculate outcome score (-1.0 to 1.0)
-                    outcome_score = self._calculate_outcome_score(exp_outcome)
-                    
-                    # Calculate weighted contribution of this experience
-                    contribution = context_similarity * outcome_score * recency_weights[j]
-                    
-                    # Add to option score
-                    option_scores[i] += contribution
+                # Get outcome score from past experience
+                outcome_score = exp.get("outcome_score", 0.5)
+                
+                # Combine similarity, outcome score, and recency weight
+                option_score += similarity * outcome_score * recency_weights[j]
             
-            # Normalize score to 0.0-1.0 range
-            option_scores[i] = max(0.0, min(1.0, (option_scores[i] + 1.0) / 2.0))
-            
-            # Combine with basic decision score
-            basic_score = self._calculate_basic_score(option, context)
-            option_scores[i] = (
-                self.experience_weight * option_scores[i] + 
-                (1.0 - self.experience_weight) * basic_score
-            )
+            option_scores[i] = option_score
+        
+        # Normalize scores
+        max_score = max(option_scores) if option_scores else 0.0
+        if max_score > 0:
+            option_scores = [score / max_score for score in option_scores]
         
         return option_scores
+    
+    def _calculate_similarity(self, 
+                            option: Dict[str, Any], 
+                            experience: Dict[str, Any], 
+                            context: Dict[str, Any]) -> float:
+        """
+        Calculate similarity between current option and past experience.
+        
+        Args:
+            option: Current decision option
+            experience: Past experience
+            context: Current context
+            
+        Returns:
+            Similarity score between 0.0 and 1.0
+        """
+        # This is a placeholder for a more sophisticated similarity calculation
+        # In a real implementation, this would use semantic similarity or feature-based comparison
+        
+        # Simple attribute matching
+        match_count = 0
+        total_checks = 0
+        
+        # Check option attributes against experience
+        if "attributes" in option and "attributes" in experience:
+            opt_attrs = option["attributes"]
+            exp_attrs = experience["attributes"]
+            
+            for key, value in opt_attrs.items():
+                if key in exp_attrs:
+                    total_checks += 1
+                    if exp_attrs[key] == value:
+                        match_count += 1
+        
+        # Check context attributes against experience context
+        if "context" in experience:
+            exp_context = experience["context"]
+            
+            for key, value in context.items():
+                if key in exp_context:
+                    total_checks += 1
+                    if exp_context[key] == value:
+                        match_count += 1
+        
+        # If no checks were possible, return low similarity
+        if total_checks == 0:
+            return 0.1
+        
+        return match_count / total_checks
+
+
+class CognitiveIntegration:
+    """
+    Cognitive Integration System for TAAT.
+    
+    Integrates memory systems with cognitive processes for enhanced reasoning,
+    decision-making, and learning capabilities.
+    """
+    
+    def __init__(self):
+        """Initialize the cognitive integration system."""
+        self.memory_augmented_reasoning = MemoryAugmentedReasoning()
+        self.experience_guided_decision = ExperienceGuidedDecisionMaking()
+        self.episodic_memory = None
+        self.semantic_memory = None
+        self.procedural_memory = None
+        self.advanced_retrieval = None
+        self.memory_consolidation = None
+        self.logger = logging.getLogger("CognitiveIntegration")
+    
+    def connect_memory_systems(self, 
+                             episodic_memory: Any, 
+                             semantic_memory: Any, 
+                             procedural_memory: Any,
+                             advanced_retrieval: Any = None,
+                             memory_consolidation: Any = None) -> None:
+        """
+        Connect to memory systems.
+        
+        Args:
+            episodic_memory: Episodic memory system
+            semantic_memory: Semantic memory system
+            procedural_memory: Procedural memory system
+            advanced_retrieval: Optional advanced retrieval system
+            memory_consolidation: Optional memory consolidation system
+        """
+        self.episodic_memory = episodic_memory
+        self.semantic_memory = semantic_memory
+        self.procedural_memory = procedural_memory
+        self.advanced_retrieval = advanced_retrieval
+        self.memory_consolidation = memory_consolidation
+        self.logger.info("Connected to memory systems")
+    
+    def reason_with_memories(self, 
+                           query: str, 
+                           context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Perform reasoning augmented with relevant memories.
+        
+        Args:
+            query: The reasoning query
+            context: Current context
+            
+        Returns:
+            Reasoning result
+        """
+        # Retrieve relevant memories
+        relevant_memories = self._retrieve_relevant_memories(query, context)
+        
+        # Perform memory-augmented reasoning
+        reasoning_result = self.memory_augmented_reasoning.augment_reasoning(
+            query=query,
+            context=context,
+            relevant_memories=relevant_memories
+        )
+        
+        # Record reasoning in episodic memory if available
+        if self.episodic_memory:
+            self.episodic_memory.store(
+                memory_type="reasoning",
+                content={
+                    "query": query,
+                    "result": reasoning_result["result"]["conclusion"]
+                },
+                metadata={
+                    "timestamp": datetime.now(),
+                    "context": context,
+                    "confidence": reasoning_result["result"].get("confidence", 0.5),
+                    "memory_augmented": reasoning_result["result"].get("memory_augmented", False)
+                }
+            )
+        
+        return reasoning_result
+    
+    def make_decision_with_experiences(self, 
+                                     options: List[Dict[str, Any]], 
+                                     context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make a decision guided by past experiences.
+        
+        Args:
+            options: List of decision options
+            context: Current context
+            
+        Returns:
+            Decision result
+        """
+        # Retrieve relevant past experiences
+        past_experiences = self._retrieve_past_experiences(options, context)
+        
+        # Make experience-guided decision
+        decision_result = self.experience_guided_decision.make_decision(
+            options=options,
+            context=context,
+            past_experiences=past_experiences
+        )
+        
+        # Record decision in episodic memory if available
+        if self.episodic_memory:
+            self.episodic_memory.store(
+                memory_type="decision",
+                content={
+                    "options": options,
+                    "selected": decision_result["decision"]
+                },
+                metadata={
+                    "timestamp": datetime.now(),
+                    "context": context,
+                    "confidence": decision_result.get("confidence", 0.5),
+                    "exploration": decision_result.get("exploration", False)
+                }
+            )
+        
+        return decision_result
+    
+    def learn_from_feedback(self, 
+                          memory_id: str, 
+                          feedback: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Learn from feedback on a past memory.
+        
+        Args:
+            memory_id: ID of the memory to update
+            feedback: Feedback information
+            
+        Returns:
+            Learning result
+        """
+        if not self.episodic_memory:
+            return {"learned": False, "error": "No episodic memory connected"}
+        
+        # Retrieve the memory
+        memory = self.episodic_memory.retrieve_by_id(memory_id)
+        
+        if not memory:
+            return {"learned": False, "error": f"Memory {memory_id} not found"}
+        
+        # Update memory with feedback
+        memory_type = memory.get("type")
+        
+        if memory_type == "decision":
+            # For decisions, update with outcome information
+            outcome_score = feedback.get("outcome_score", 0.5)
+            
+            self.episodic_memory.update_memory(
+                memory_id=memory_id,
+                metadata_updates={
+                    "outcome_score": outcome_score,
+                    "feedback": feedback.get("feedback", ""),
+                    "feedback_timestamp": datetime.now()
+                }
+            )
+            
+            # Extract procedural knowledge if consolidation is available
+            if self.memory_consolidation:
+                self.memory_consolidation.extract_procedural_knowledge([memory])
+        
+        elif memory_type == "reasoning":
+            # For reasoning, update with correctness information
+            correctness = feedback.get("correctness", 0.5)
+            
+            self.episodic_memory.update_memory(
+                memory_id=memory_id,
+                metadata_updates={
+                    "correctness": correctness,
+                    "feedback": feedback.get("feedback", ""),
+                    "feedback_timestamp": datetime.now()
+                }
+            )
+            
+            # Extract semantic knowledge if consolidation is available
+            if self.memory_consolidation:
+                self.memory_consolidation.extract_semantic_knowledge([memory])
+        
+        else:
+            # For other memory types, just add feedback
+            self.episodic_memory.update_memory(
+                memory_id=memory_id,
+                metadata_updates={
+                    "feedback": feedback.get("feedback", ""),
+                    "feedback_timestamp": datetime.now()
+                }
+            )
+        
+        # Trigger memory consolidation if available
+        if self.memory_consolidation:
+            self.memory_consolidation.consolidate_memories(recent_memories=[memory_id])
+        
+        return {
+            "learned": True,
+            "memory_id": memory_id,
+            "memory_type": memory_type,
+            "feedback_applied": feedback
+        }
+    
+    def integrate_new_knowledge(self, 
+                              knowledge: Dict[str, Any], 
+                              knowledge_type: str) -> Dict[str, Any]:
+        """
+        Integrate new knowledge into memory systems.
+        
+        Args:
+            knowledge: New knowledge to integrate
+            knowledge_type: Type of knowledge (episodic, semantic, procedural)
+            
+        Returns:
+            Integration result
+        """
+        result = {
+            "integrated": False,
+            "memory_id": None,
+            "knowledge_type": knowledge_type
+        }
+        
+        if knowledge_type == "episodic" and self.episodic_memory:
+            # Store in episodic memory
+            memory_id = self.episodic_memory.store(
+                memory_type=knowledge.get("type", "observation"),
+                content=knowledge.get("content", {}),
+                metadata=knowledge.get("metadata", {"timestamp": datetime.now()})
+            )
+            
+            result["integrated"] = True
+            result["memory_id"] = memory_id
+        
+        elif knowledge_type == "semantic" and self.semantic_memory:
+            # Store in semantic memory
+            concept_id = self.semantic_memory.store_concept(
+                name=knowledge.get("name", "concept"),
+                attributes=knowledge.get("attributes", {}),
+                relationships=knowledge.get("relationships", [])
+            )
+            
+            result["integrated"] = True
+            result["memory_id"] = concept_id
+        
+        elif knowledge_type == "procedural" and self.procedural_memory:
+            # Store in procedural memory
+            procedure_id = self.procedural_memory.store_procedure(
+                name=knowledge.get("name", "procedure"),
+                steps=knowledge.get("steps", []),
+                context=knowledge.get("context", {}),
+                metadata=knowledge.get("metadata", {})
+            )
+            
+            result["integrated"] = True
+            result["memory_id"] = procedure_id
+        
+        # Trigger memory consolidation if available
+        if result["integrated"] and self.memory_consolidation:
+            self.memory_consolidation.consolidate_memories(
+                recent_memories=[result["memory_id"]]
+            )
+        
+        return result
+    
+    def _retrieve_relevant_memories(self, 
+                                  query: str, 
+                                  context: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Retrieve memories relevant to a query and context.
+        
+        Args:
+            query: The query
+            context: Current context
+            
+        Returns:
+            Dictionary of relevant memories by type
+        """
+        relevant_memories = {
+            "episodic": [],
+            "semantic": [],
+            "procedural": []
+        }
+        
+        # Use advanced retrieval if available
+        if self.advanced_retrieval:
+            retrieval_query = {
+                "content": query,
+                "context": context
+            }
+            
+            retrieval_result = self.advanced_retrieval.retrieve(
+                query=retrieval_query,
+                memory_types=["episodic", "semantic", "procedural"]
+            )
+            
+            # Process retrieval results
+            for memory in retrieval_result.get("memories", []):
+                memory_id = memory.get("id", "")
+                memory_type = self._determine_memory_type(memory)
+                
+                if memory_type:
+                    score = retrieval_result["relevance_scores"].get(memory_id, 0.5)
+                    relevant_memories[memory_type].append({
+                        "memory": memory,
+                        "score": score
+                    })
+        
+        # Fall back to basic retrieval if advanced retrieval is not available or returned no results
+        if not any(relevant_memories.values()) and self.episodic_memory:
+            # Basic episodic memory retrieval
+            episodic_results = self.episodic_memory.search_by_content({"text": query})
+            
+            for memory in episodic_results:
+                relevant_memories["episodic"].append({
+                    "memory": memory,
+                    "score": 0.7  # Default score for basic retrieval
+                })
+        
+        if not any(relevant_memories.values()) and self.semantic_memory:
+            # Basic semantic memory retrieval
+            semantic_results = self.semantic_memory.get_concept_by_name(query)
+            
+            for concept in semantic_results:
+                relevant_memories["semantic"].append({
+                    "memory": concept,
+                    "score": 0.7  # Default score for basic retrieval
+                })
+        
+        return relevant_memories
+    
+    def _retrieve_past_experiences(self, 
+                                 options: List[Dict[str, Any]], 
+                                 context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Retrieve past experiences relevant to decision options and context.
+        
+        Args:
+            options: List of decision options
+            context: Current context
+            
+        Returns:
+            List of relevant past experiences
+        """
+        past_experiences = []
+        
+        if not self.episodic_memory:
+            return past_experiences
+        
+        # Retrieve decision memories
+        decision_memories = self.episodic_memory.retrieve_by_type("decision", limit=50)
+        
+        # Filter by context similarity
+        for memory in decision_memories:
+            # Only include memories with outcome feedback
+            if "metadata" in memory and "outcome_score" in memory["metadata"]:
+                # Calculate context similarity
+                context_similarity = self._calculate_context_similarity(
+                    memory.get("metadata", {}).get("context", {}),
+                    context
+                )
+                
+                # Include if similarity is above threshold
+                if context_similarity > 0.3:
+                    past_experiences.append(memory)
+        
+        return past_experiences
+    
+    def _determine_memory_type(self, memory: Dict[str, Any]) -> Optional[str]:
+        """
+        Determine the type of a memory.
+        
+        Args:
+            memory: Memory to check
+            
+        Returns:
+            Memory type (episodic, semantic, procedural) or None if unknown
+        """
+        # Check for explicit type field
+        if "type" in memory:
+            memory_type = memory["type"]
+            
+            if memory_type in ["perception", "action", "decision", "reasoning", "observation"]:
+                return "episodic"
+            elif memory_type in ["concept", "fact", "knowledge"]:
+                return "semantic"
+            elif memory_type in ["procedure", "skill", "method"]:
+                return "procedural"
+        
+        # Check for characteristic fields
+        if "content" in memory and "metadata" in memory and "timestamp" in memory.get("metadata", {}):
+            return "episodic"
+        
+        if "name" in memory and "attributes" in memory:
+            return "semantic"
+        
+        if "steps" in memory or "procedure_steps" in memory:
+            return "procedural"
+        
+        return None
     
     def _calculate_context_similarity(self, 
                                     context1: Dict[str, Any], 
@@ -487,1004 +955,20 @@ class ExperienceGuidedDecisionMaking:
             Similarity score between 0.0 and 1.0
         """
         if not context1 or not context2:
-            return 0.5  # Default if either context is empty
-        
-        # Find common keys
-        common_keys = set(context1.keys()).intersection(set(context2.keys()))
-        if not common_keys:
             return 0.0
         
-        # Calculate similarity for each common key
-        similarities = []
-        for key in common_keys:
-            val1 = context1[key]
-            val2 = context2[key]
-            
-            # Calculate value similarity based on type
-            if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
-                # Numeric similarity
-                max_val = max(abs(val1), abs(val2))
-                if max_val > 0:
-                    similarities.append(1.0 - min(1.0, abs(val1 - val2) / max_val))
-                else:
-                    similarities.append(1.0 if val1 == val2 else 0.0)
-            elif isinstance(val1, str) and isinstance(val2, str):
-                # String similarity
-                if val1 == val2:
-                    similarities.append(1.0)
-                elif val1.lower() == val2.lower():
-                    similarities.append(0.9)
-                elif val1.lower() in val2.lower() or val2.lower() in val1.lower():
-                    similarities.append(0.7)
-                else:
-                    similarities.append(0.0)
-            else:
-                # Other types
-                similarities.append(1.0 if val1 == val2 else 0.0)
+        # Count matching attributes
+        match_count = 0
+        total_checks = 0
         
-        # Return average similarity
-        return sum(similarities) / len(similarities) if similarities else 0.0
-    
-    def _calculate_outcome_score(self, outcome: Dict[str, Any]) -> float:
-        """
-        Calculate a score for an outcome.
+        for key, value in context1.items():
+            if key in context2:
+                total_checks += 1
+                if context2[key] == value:
+                    match_count += 1
         
-        Args:
-            outcome: Outcome data
-            
-        Returns:
-            Score between -1.0 and 1.0
-        """
-        if not outcome:
+        # If no checks were possible, return low similarity
+        if total_checks == 0:
             return 0.0
         
-        # Check for explicit success/failure indicators
-        if "success" in outcome:
-            success = outcome["success"]
-            if isinstance(success, bool):
-                return 1.0 if success else -1.0
-            elif isinstance(success, (int, float)):
-                return max(-1.0, min(1.0, float(success) * 2.0 - 1.0))
-        
-        # Check for score or rating
-        if "score" in outcome:
-            score = outcome["score"]
-            if isinstance(score, (int, float)):
-                # Normalize to -1.0 to 1.0 range
-                # Assuming score is in 0.0-1.0 range
-                return max(-1.0, min(1.0, score * 2.0 - 1.0))
-        
-        # Check for error indicator
-        if "error" in outcome and outcome["error"]:
-            return -1.0
-        
-        # Default neutral outcome
-        return 0.0
-    
-    def _calculate_basic_score(self, option: Dict[str, Any], context: Dict[str, Any]) -> float:
-        """
-        Calculate a basic score for an option without using experiences.
-        
-        Args:
-            option: Decision option
-            context: Current context
-            
-        Returns:
-            Score between 0.0 and 1.0
-        """
-        # This is a placeholder for actual option scoring logic
-        # In a real implementation, this would use a model or heuristics
-        
-        # Check if option has an explicit score
-        if "score" in option:
-            score = option["score"]
-            if isinstance(score, (int, float)):
-                return max(0.0, min(1.0, float(score)))
-        
-        # Check if option has a priority
-        if "priority" in option:
-            priority = option["priority"]
-            if isinstance(priority, (int, float)):
-                return max(0.0, min(1.0, float(priority) / 10.0))
-        
-        # Default score
-        return 0.5
-    
-    def _make_basic_decision(self, options: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Make a basic decision without using past experiences.
-        
-        Args:
-            options: List of decision options
-            context: Current context
-            
-        Returns:
-            Decision result
-        """
-        if not options:
-            return {"decision": None, "reason": "No options provided"}
-        
-        # Calculate basic scores
-        scores = [self._calculate_basic_score(option, context) for option in options]
-        
-        # Choose the highest scoring option
-        best_index = scores.index(max(scores))
-        
-        return {
-            "decision": options[best_index],
-            "score": scores[best_index],
-            "reason": "Basic decision: no relevant past experiences available",
-            "experience_guided": False,
-            "confidence": 0.3 + 0.4 * scores[best_index]  # Lower confidence without experiences
-        }
-
-
-class KnowledgeEnhancedPerception:
-    """
-    Knowledge-enhanced perception system.
-    
-    Uses semantic knowledge to enhance perception and interpretation.
-    """
-    
-    def __init__(self, 
-                knowledge_weight: float = 0.6, 
-                context_weight: float = 0.3,
-                novelty_threshold: float = 0.7):
-        """
-        Initialize the knowledge-enhanced perception system.
-        
-        Args:
-            knowledge_weight: Weight given to knowledge-based interpretation
-            context_weight: Weight given to context-based interpretation
-            novelty_threshold: Threshold for detecting novel information
-        """
-        self.knowledge_weight = knowledge_weight
-        self.context_weight = context_weight
-        self.novelty_threshold = novelty_threshold
-    
-    def enhance_perception(self, 
-                         input_data: Any, 
-                         input_type: str, 
-                         context: Dict[str, Any], 
-                         knowledge: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Enhance perception with semantic knowledge.
-        
-        Args:
-            input_data: Raw input data
-            input_type: Type of input data
-            context: Current context
-            knowledge: Relevant knowledge from semantic memory
-            
-        Returns:
-            Enhanced perception result
-        """
-        # Process raw input
-        basic_perception = self._process_raw_input(input_data, input_type)
-        
-        # If no knowledge available, return basic perception
-        if not knowledge:
-            return {
-                "enhanced": False,
-                "reason": "No relevant knowledge available",
-                "perception": basic_perception
-            }
-        
-        # Enhance with knowledge
-        enhanced_perception = self._apply_knowledge_enhancement(basic_perception, knowledge, context)
-        
-        # Detect novel information
-        novelty = self._detect_novelty(enhanced_perception, knowledge)
-        
-        return {
-            "enhanced": True,
-            "perception": enhanced_perception,
-            "novelty": novelty,
-            "knowledge_applied": len(knowledge)
-        }
-    
-    def _process_raw_input(self, input_data: Any, input_type: str) -> Dict[str, Any]:
-        """
-        Process raw input data.
-        
-        Args:
-            input_data: Raw input data
-            input_type: Type of input data
-            
-        Returns:
-            Basic perception result
-        """
-        # This is a placeholder for actual input processing logic
-        # In a real implementation, this would use appropriate processing for each input type
-        
-        if input_type == "text":
-            return self._process_text_input(input_data)
-        elif input_type == "image":
-            return self._process_image_input(input_data)
-        elif input_type == "market_data":
-            return self._process_market_data_input(input_data)
-        else:
-            # Generic processing
-            return {
-                "type": input_type,
-                "raw_content": str(input_data)[:100],  # Truncate for large inputs
-                "timestamp": datetime.now().isoformat()
-            }
-    
-    def _process_text_input(self, text: str) -> Dict[str, Any]:
-        """
-        Process text input.
-        
-        Args:
-            text: Text input
-            
-        Returns:
-            Processed text perception
-        """
-        # Simple text processing (placeholder for more sophisticated NLP)
-        words = text.split()
-        word_count = len(words)
-        
-        # Extract potential entities (capitalized words)
-        entities = set(word for word in words if word and word[0].isupper())
-        
-        # Simple sentiment analysis
-        positive_words = ["good", "great", "excellent", "positive", "success", "profit", "up", "gain"]
-        negative_words = ["bad", "poor", "negative", "failure", "loss", "down", "decline"]
-        
-        sentiment_score = 0
-        for word in words:
-            word_lower = word.lower()
-            if word_lower in positive_words:
-                sentiment_score += 1
-            elif word_lower in negative_words:
-                sentiment_score -= 1
-        
-        if word_count > 0:
-            sentiment_score = sentiment_score / math.sqrt(word_count)  # Normalize by sqrt of length
-        
-        return {
-            "type": "text",
-            "content": text,
-            "word_count": word_count,
-            "entities": list(entities),
-            "sentiment": {
-                "score": max(-1.0, min(1.0, sentiment_score)),
-                "label": "positive" if sentiment_score > 0.2 else "negative" if sentiment_score < -0.2 else "neutral"
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    def _process_image_input(self, image_data: Any) -> Dict[str, Any]:
-        """
-        Process image input.
-        
-        Args:
-            image_data: Image data
-            
-        Returns:
-            Processed image perception
-        """
-        # Placeholder for image processing
-        return {
-            "type": "image",
-            "content": "Image data",
-            "format": "unknown",
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    def _process_market_data_input(self, market_data: Any) -> Dict[str, Any]:
-        """
-        Process market data input.
-        
-        Args:
-            market_data: Market data
-            
-        Returns:
-            Processed market data perception
-        """
-        # Placeholder for market data processing
-        return {
-            "type": "market_data",
-            "content": "Market data",
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    def _apply_knowledge_enhancement(self, 
-                                   perception: Dict[str, Any], 
-                                   knowledge: List[Dict[str, Any]], 
-                                   context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Apply knowledge enhancement to perception.
-        
-        Args:
-            perception: Basic perception
-            knowledge: Relevant knowledge
-            context: Current context
-            
-        Returns:
-            Enhanced perception
-        """
-        # Create a copy to avoid modifying the original
-        enhanced = perception.copy()
-        enhanced["knowledge_enhanced"] = True
-        
-        # Apply knowledge based on perception type
-        if perception["type"] == "text":
-            enhanced = self._enhance_text_perception(enhanced, knowledge, context)
-        elif perception["type"] == "image":
-            enhanced = self._enhance_image_perception(enhanced, knowledge, context)
-        elif perception["type"] == "market_data":
-            enhanced = self._enhance_market_data_perception(enhanced, knowledge, context)
-        
-        # Add knowledge sources
-        enhanced["knowledge_sources"] = [
-            {
-                "id": k.get("id", "unknown"),
-                "type": k.get("type", "unknown"),
-                "relevance": k.get("score", 0.5)
-            }
-            for k in knowledge
-        ]
-        
-        return enhanced
-    
-    def _enhance_text_perception(self, 
-                               perception: Dict[str, Any], 
-                               knowledge: List[Dict[str, Any]], 
-                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Enhance text perception with knowledge.
-        
-        Args:
-            perception: Basic text perception
-            knowledge: Relevant knowledge
-            context: Current context
-            
-        Returns:
-            Enhanced text perception
-        """
-        enhanced = perception.copy()
-        
-        # Extract entities from perception
-        entities = set(perception.get("entities", []))
-        
-        # Extract content
-        content = perception.get("content", "")
-        
-        # Entity recognition enhancement
-        known_entities = {}
-        for k in knowledge:
-            k_content = k.get("content", "")
-            k_type = k.get("category", "")
-            
-            # Check if knowledge entity appears in content
-            if isinstance(k_content, str) and k_content in content:
-                known_entities[k_content] = {
-                    "type": k_type,
-                    "confidence": k.get("score", 0.5),
-                    "source": k.get("id", "unknown")
-                }
-        
-        if known_entities:
-            enhanced["known_entities"] = known_entities
-        
-        # Topic classification
-        topics = self._classify_topics(content, knowledge)
-        if topics:
-            enhanced["topics"] = topics
-        
-        # Context-aware interpretation
-        if context:
-            interpretation = self._generate_interpretation(content, knowledge, context)
-            if interpretation:
-                enhanced["interpretation"] = interpretation
-        
-        return enhanced
-    
-    def _enhance_image_perception(self, 
-                                perception: Dict[str, Any], 
-                                knowledge: List[Dict[str, Any]], 
-                                context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Enhance image perception with knowledge.
-        
-        Args:
-            perception: Basic image perception
-            knowledge: Relevant knowledge
-            context: Current context
-            
-        Returns:
-            Enhanced image perception
-        """
-        # Placeholder for image perception enhancement
-        return perception
-    
-    def _enhance_market_data_perception(self, 
-                                      perception: Dict[str, Any], 
-                                      knowledge: List[Dict[str, Any]], 
-                                      context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Enhance market data perception with knowledge.
-        
-        Args:
-            perception: Basic market data perception
-            knowledge: Relevant knowledge
-            context: Current context
-            
-        Returns:
-            Enhanced market data perception
-        """
-        # Placeholder for market data perception enhancement
-        return perception
-    
-    def _classify_topics(self, content: str, knowledge: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Classify topics in content using knowledge.
-        
-        Args:
-            content: Text content
-            knowledge: Relevant knowledge
-            
-        Returns:
-            List of identified topics with confidence scores
-        """
-        topics = []
-        content_lower = content.lower()
-        
-        # Extract topics from knowledge
-        for k in knowledge:
-            if k.get("category") == "topic":
-                topic_name = k.get("content", "")
-                if isinstance(topic_name, str) and topic_name.lower() in content_lower:
-                    topics.append({
-                        "name": topic_name,
-                        "confidence": k.get("score", 0.5),
-                        "source": k.get("id", "unknown")
-                    })
-        
-        # Sort by confidence
-        topics.sort(key=lambda x: x["confidence"], reverse=True)
-        
-        return topics
-    
-    def _generate_interpretation(self, 
-                               content: str, 
-                               knowledge: List[Dict[str, Any]], 
-                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate context-aware interpretation of content.
-        
-        Args:
-            content: Text content
-            knowledge: Relevant knowledge
-            context: Current context
-            
-        Returns:
-            Interpretation data
-        """
-        # This is a placeholder for actual interpretation logic
-        # In a real implementation, this would use an LLM or other interpretation system
-        
-        # Extract relevant context factors
-        context_factors = {}
-        for key, value in context.items():
-            if key in ["user_preferences", "current_task", "recent_topics"]:
-                context_factors[key] = value
-        
-        # Simple interpretation based on knowledge and context
-        interpretation = {
-            "summary": f"Interpretation of content with {len(knowledge)} knowledge items",
-            "confidence": 0.5,
-            "context_factors": context_factors
-        }
-        
-        return interpretation
-    
-    def _detect_novelty(self, 
-                      perception: Dict[str, Any], 
-                      knowledge: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Detect novel information in perception.
-        
-        Args:
-            perception: Enhanced perception
-            knowledge: Relevant knowledge
-            
-        Returns:
-            Novelty detection result
-        """
-        # This is a placeholder for actual novelty detection logic
-        # In a real implementation, this would use more sophisticated comparison
-        
-        # Extract content
-        if perception["type"] == "text":
-            content = perception.get("content", "")
-            
-            # Check how much of the content is covered by existing knowledge
-            coverage = 0.0
-            for k in knowledge:
-                k_content = k.get("content", "")
-                if isinstance(k_content, str) and k_content in content:
-                    # Estimate coverage by length ratio
-                    coverage += len(k_content) / len(content) if len(content) > 0 else 0
-            
-            # Cap coverage at 1.0
-            coverage = min(1.0, coverage)
-            
-            # Novelty is inverse of coverage
-            novelty_score = 1.0 - coverage
-            
-            return {
-                "score": novelty_score,
-                "is_novel": novelty_score > self.novelty_threshold,
-                "coverage": coverage
-            }
-        
-        # Default for other perception types
-        return {
-            "score": 0.5,
-            "is_novel": False
-        }
-
-
-class ReflectiveProcessor:
-    """
-    Reflective processing system.
-    
-    Implements reflection mechanisms to learn from past actions and outcomes.
-    """
-    
-    def __init__(self, 
-                reflection_threshold: float = 0.5, 
-                learning_rate: float = 0.1):
-        """
-        Initialize the reflective processor.
-        
-        Args:
-            reflection_threshold: Threshold for triggering reflection
-            learning_rate: Rate at which new insights update existing knowledge
-        """
-        self.reflection_threshold = reflection_threshold
-        self.learning_rate = learning_rate
-    
-    def reflect_on_outcome(self, 
-                         action: Dict[str, Any], 
-                         outcome: Dict[str, Any], 
-                         context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Reflect on an action outcome to generate insights.
-        
-        Args:
-            action: The action that was taken
-            outcome: The outcome that resulted
-            context: The context in which the action was taken
-            
-        Returns:
-            Reflection results with insights
-        """
-        # Determine if reflection is needed
-        reflection_score = self._calculate_reflection_score(action, outcome)
-        
-        if reflection_score < self.reflection_threshold:
-            return {
-                "reflected": False,
-                "reason": f"Reflection score {reflection_score} below threshold {self.reflection_threshold}"
-            }
-        
-        # Analyze the outcome
-        outcome_analysis = self._analyze_outcome(action, outcome, context)
-        
-        # Generate insights
-        insights = self._generate_insights(action, outcome, context, outcome_analysis)
-        
-        # Generate learning updates
-        learning_updates = self._generate_learning_updates(insights)
-        
-        return {
-            "reflected": True,
-            "reflection_score": reflection_score,
-            "outcome_analysis": outcome_analysis,
-            "insights": insights,
-            "learning_updates": learning_updates
-        }
-    
-    def _calculate_reflection_score(self, action: Dict[str, Any], outcome: Dict[str, Any]) -> float:
-        """
-        Calculate a score to determine if reflection is needed.
-        
-        Args:
-            action: The action that was taken
-            outcome: The outcome that resulted
-            
-        Returns:
-            Reflection score between 0.0 and 1.0
-        """
-        score_components = []
-        
-        # Check for unexpected outcomes
-        if "expected" in outcome and "actual" in outcome:
-            expected = outcome["expected"]
-            actual = outcome["actual"]
-            
-            if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
-                # Calculate normalized difference
-                max_val = max(abs(expected), abs(actual))
-                if max_val > 0:
-                    difference = abs(expected - actual) / max_val
-                    # Higher difference = higher reflection score
-                    score_components.append(min(1.0, difference))
-        
-        # Check for errors
-        if "error" in outcome and outcome["error"]:
-            score_components.append(1.0)  # Always reflect on errors
-        
-        # Check for explicit success/failure
-        if "success" in outcome:
-            success = outcome["success"]
-            if isinstance(success, bool):
-                # Reflect more on failures than successes
-                score_components.append(0.8 if not success else 0.3)
-            elif isinstance(success, (int, float)):
-                # Lower success = higher reflection score
-                score_components.append(1.0 - max(0.0, min(1.0, float(success))))
-        
-        # Check for high-impact outcomes
-        if "impact" in outcome:
-            impact = outcome["impact"]
-            if isinstance(impact, (int, float)):
-                # Higher impact = higher reflection score
-                score_components.append(max(0.0, min(1.0, float(impact))))
-        
-        # Return maximum score if any component is high, otherwise average
-        if score_components:
-            max_score = max(score_components)
-            if max_score > 0.7:
-                return max_score
-            else:
-                return sum(score_components) / len(score_components)
-        
-        return 0.3  # Default reflection score
-    
-    def _analyze_outcome(self, 
-                       action: Dict[str, Any], 
-                       outcome: Dict[str, Any], 
-                       context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Analyze the outcome of an action.
-        
-        Args:
-            action: The action that was taken
-            outcome: The outcome that resulted
-            context: The context in which the action was taken
-            
-        Returns:
-            Outcome analysis
-        """
-        analysis = {
-            "success_level": self._determine_success_level(outcome),
-            "factors": self._identify_outcome_factors(action, outcome, context),
-            "deviations": self._identify_deviations(action, outcome)
-        }
-        
-        return analysis
-    
-    def _determine_success_level(self, outcome: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Determine the level of success of an outcome.
-        
-        Args:
-            outcome: The outcome to analyze
-            
-        Returns:
-            Success level data
-        """
-        # Check for explicit success indicator
-        if "success" in outcome:
-            success = outcome["success"]
-            if isinstance(success, bool):
-                return {
-                    "level": "success" if success else "failure",
-                    "score": 1.0 if success else 0.0,
-                    "confidence": 1.0
-                }
-            elif isinstance(success, (int, float)):
-                score = max(0.0, min(1.0, float(success)))
-                if score > 0.7:
-                    level = "success"
-                elif score > 0.3:
-                    level = "partial_success"
-                else:
-                    level = "failure"
-                    
-                return {
-                    "level": level,
-                    "score": score,
-                    "confidence": 1.0
-                }
-        
-        # Check for error indicator
-        if "error" in outcome and outcome["error"]:
-            return {
-                "level": "failure",
-                "score": 0.0,
-                "confidence": 1.0,
-                "error": True
-            }
-        
-        # Check for metrics
-        if "metrics" in outcome and isinstance(outcome["metrics"], dict):
-            metrics = outcome["metrics"]
-            
-            # Calculate average of numeric metrics
-            numeric_metrics = [v for v in metrics.values() if isinstance(v, (int, float))]
-            if numeric_metrics:
-                avg_score = sum(numeric_metrics) / len(numeric_metrics)
-                normalized_score = max(0.0, min(1.0, avg_score))
-                
-                if normalized_score > 0.7:
-                    level = "success"
-                elif normalized_score > 0.3:
-                    level = "partial_success"
-                else:
-                    level = "failure"
-                    
-                return {
-                    "level": level,
-                    "score": normalized_score,
-                    "confidence": 0.7
-                }
-        
-        # Default if no clear indicators
-        return {
-            "level": "unknown",
-            "score": 0.5,
-            "confidence": 0.3
-        }
-    
-    def _identify_outcome_factors(self, 
-                                action: Dict[str, Any], 
-                                outcome: Dict[str, Any], 
-                                context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Identify factors that influenced the outcome.
-        
-        Args:
-            action: The action that was taken
-            outcome: The outcome that resulted
-            context: The context in which the action was taken
-            
-        Returns:
-            List of identified factors
-        """
-        factors = []
-        
-        # Check for explicit factors in outcome
-        if "factors" in outcome and isinstance(outcome["factors"], list):
-            return outcome["factors"]
-        
-        # Check action parameters
-        if "parameters" in action and isinstance(action["parameters"], dict):
-            for key, value in action["parameters"].items():
-                factors.append({
-                    "type": "action_parameter",
-                    "name": key,
-                    "value": value,
-                    "importance": 0.7
-                })
-        
-        # Check context factors
-        for key, value in context.items():
-            # Only include simple values
-            if isinstance(value, (str, int, float, bool)):
-                factors.append({
-                    "type": "context_factor",
-                    "name": key,
-                    "value": value,
-                    "importance": 0.5
-                })
-        
-        # Check timing factors
-        if "timestamp" in action and "timestamp" in outcome:
-            try:
-                action_time = datetime.fromisoformat(action["timestamp"].replace('Z', '+00:00'))
-                outcome_time = datetime.fromisoformat(outcome["timestamp"].replace('Z', '+00:00'))
-                
-                duration = (outcome_time - action_time).total_seconds()
-                
-                factors.append({
-                    "type": "timing_factor",
-                    "name": "duration",
-                    "value": duration,
-                    "unit": "seconds",
-                    "importance": 0.4
-                })
-            except (ValueError, TypeError, AttributeError):
-                pass
-        
-        return factors
-    
-    def _identify_deviations(self, action: Dict[str, Any], outcome: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Identify deviations between expected and actual outcomes.
-        
-        Args:
-            action: The action that was taken
-            outcome: The outcome that resulted
-            
-        Returns:
-            List of identified deviations
-        """
-        deviations = []
-        
-        # Check for explicit expected vs. actual comparisons
-        if "expected" in outcome and "actual" in outcome:
-            expected = outcome["expected"]
-            actual = outcome["actual"]
-            
-            if isinstance(expected, dict) and isinstance(actual, dict):
-                # Compare dictionaries
-                all_keys = set(expected.keys()).union(set(actual.keys()))
-                
-                for key in all_keys:
-                    exp_val = expected.get(key)
-                    act_val = actual.get(key)
-                    
-                    if exp_val != act_val:
-                        deviations.append({
-                            "field": key,
-                            "expected": exp_val,
-                            "actual": act_val,
-                            "significance": self._calculate_deviation_significance(exp_val, act_val)
-                        })
-            elif expected != actual:
-                # Simple comparison
-                deviations.append({
-                    "field": "result",
-                    "expected": expected,
-                    "actual": actual,
-                    "significance": self._calculate_deviation_significance(expected, actual)
-                })
-        
-        return deviations
-    
-    def _calculate_deviation_significance(self, expected: Any, actual: Any) -> float:
-        """
-        Calculate the significance of a deviation.
-        
-        Args:
-            expected: Expected value
-            actual: Actual value
-            
-        Returns:
-            Significance score between 0.0 and 1.0
-        """
-        if expected == actual:
-            return 0.0
-        
-        # For numeric values, calculate relative difference
-        if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
-            max_val = max(abs(expected), abs(actual))
-            if max_val > 0:
-                return min(1.0, abs(expected - actual) / max_val)
-        
-        # For booleans, a difference is maximally significant
-        if isinstance(expected, bool) and isinstance(actual, bool):
-            return 1.0
-        
-        # For strings, use length difference as a proxy
-        if isinstance(expected, str) and isinstance(actual, str):
-            max_len = max(len(expected), len(actual))
-            if max_len > 0:
-                return min(1.0, abs(len(expected) - len(actual)) / max_len)
-        
-        # Default for other types
-        return 0.5
-    
-    def _generate_insights(self, 
-                         action: Dict[str, Any], 
-                         outcome: Dict[str, Any], 
-                         context: Dict[str, Any], 
-                         analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Generate insights from outcome analysis.
-        
-        Args:
-            action: The action that was taken
-            outcome: The outcome that resulted
-            context: The context in which the action was taken
-            analysis: Outcome analysis
-            
-        Returns:
-            List of insights
-        """
-        insights = []
-        
-        # Generate success/failure insight
-        success_level = analysis["success_level"]
-        if success_level["level"] != "unknown":
-            insights.append({
-                "type": "outcome_pattern",
-                "content": f"Action {action.get('type', 'unknown')} resulted in {success_level['level']}",
-                "confidence": success_level["confidence"],
-                "action_type": action.get("type", "unknown"),
-                "outcome_level": success_level["level"]
-            })
-        
-        # Generate insights from factors
-        for factor in analysis["factors"]:
-            if factor["importance"] > 0.5:
-                insights.append({
-                    "type": "factor_influence",
-                    "content": f"Factor {factor['name']} influenced the outcome",
-                    "confidence": factor["importance"],
-                    "factor_name": factor["name"],
-                    "factor_type": factor["type"]
-                })
-        
-        # Generate insights from deviations
-        for deviation in analysis["deviations"]:
-            if deviation["significance"] > 0.5:
-                insights.append({
-                    "type": "expectation_deviation",
-                    "content": f"Outcome deviated from expectation in {deviation['field']}",
-                    "confidence": deviation["significance"],
-                    "field": deviation["field"]
-                })
-        
-        return insights
-    
-    def _generate_learning_updates(self, insights: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate learning updates from insights.
-        
-        Args:
-            insights: List of insights
-            
-        Returns:
-            Learning updates for different memory systems
-        """
-        updates = {
-            "semantic": [],
-            "procedural": []
-        }
-        
-        # Generate semantic memory updates
-        for insight in insights:
-            if insight["type"] == "factor_influence" and insight["confidence"] > 0.6:
-                updates["semantic"].append({
-                    "operation": "store_concept",
-                    "concept_id": f"factor_{insight['factor_name']}",
-                    "content": insight["content"],
-                    "category": "factor_influence",
-                    "confidence": insight["confidence"]
-                })
-            
-            if insight["type"] == "outcome_pattern" and insight["confidence"] > 0.6:
-                updates["semantic"].append({
-                    "operation": "store_concept",
-                    "concept_id": f"pattern_{insight['action_type']}_{insight['outcome_level']}",
-                    "content": insight["content"],
-                    "category": "outcome_pattern",
-                    "confidence": insight["confidence"]
-                })
-        
-        # Generate procedural memory updates
-        action_types = set(insight["action_type"] for insight in insights 
-                         if "action_type" in insight and insight["confidence"] > 0.7)
-        
-        for action_type in action_types:
-            # Find all insights related to this action type
-            related_insights = [i for i in insights if i.get("action_type") == action_type]
-            
-            if related_insights:
-                updates["procedural"].append({
-                    "operation": "update_procedure",
-                    "procedure_id": f"proc_{action_type}",
-                    "update_data": {
-                        "insights": related_insights,
-                        "learning_rate": self.learning_rate
-                    }
-                })
-        
-        return updates
+        return match_count / total_checks
